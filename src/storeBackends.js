@@ -7,7 +7,7 @@ const throwError = (message, code = 400) => {
   throw errorObject;
 };
 
-const DEFAULT_BOX_OPTIONS = { security: 'private', personal: false };
+const DEFAULT_BOX_OPTIONS = { security: 'private', personal: false, preHooks: [], postHooksSuccess: [], postHooksSuccess: [] };
 
 // Memory backend for proof of concept
 export const memoryBackend = () => {
@@ -252,6 +252,9 @@ export const NeDBBackend = (options) => {
       if (!boxRecord) {
         throwError('Box not found', 404);
       }
+      for (hook in boxRecord.preHooks) {
+        hook('list', boxId)
+      }
 
       const boxDB = getBoxDB(boxId);
       return new Promise((resolve, reject) => {
@@ -260,9 +263,9 @@ export const NeDBBackend = (options) => {
             {},
             onlyFields.length
               ? onlyFields.reduce((acc, field) => {
-                  acc[field] = 1;
-                  return acc;
-                }, {})
+                acc[field] = 1;
+                return acc;
+              }, {})
               : {}
           )
           .limit(limit)
@@ -270,8 +273,14 @@ export const NeDBBackend = (options) => {
           .sort({ [sort]: asc ? 1 : -1 })
           .exec((err, docs) => {
             if (err) {
+              for (hook in boxRecord.postHooksFail) {
+                hook('list', err, boxId);
+              }
               /* istanbul ignore next */
               reject(err);
+            }
+            for (hook in boxRecord.postHooksSuccess) {
+              hook('list', docs, boxId);
             }
             resolve(docs);
           });
@@ -284,16 +293,29 @@ export const NeDBBackend = (options) => {
       if (!boxRecord) {
         throwError('Box not found', 404);
       }
+      for (hook in boxRecord.preHooks) {
+        hook('get', boxId, id)
+      }
 
       const boxDB = getBoxDB(boxId);
       return new Promise((resolve, reject) => {
         boxDB.findOne({ _id: id }, (err, doc) => {
           if (err) {
+            for (hook in boxRecord.postHooksFail) {
+              hook('get', err, boxId, id)
+            }
             /* istanbul ignore next */
             reject(err);
           }
           if (!doc) {
-            reject(new Error('Resource not found'));
+            newErr = new Error('Resource not found');
+            for (hook in boxRecord.postHooksFail) {
+              hook('get', newErr, boxId, id)
+            }
+            reject(newErr);
+          }
+          for (hook in boxRecord.postHooksSuccess) {
+            hook('get', doc, boxId, id)
           }
           resolve(doc);
         });
@@ -307,6 +329,10 @@ export const NeDBBackend = (options) => {
         throwError('Box not found', 404);
       }
 
+      for (hook in boxRecord.preHooks) {
+        hook('save', boxId, id, data)
+      }
+
       const boxDB = getBoxDB(boxId);
       const actualId = id || nanoid();
 
@@ -318,6 +344,9 @@ export const NeDBBackend = (options) => {
         // Creation with id or update with id
         boxDB.findOne({ _id: actualId }, (err, doc) => {
           if (err) {
+            for (hook in boxRecord.postHooksFail) {
+              hook('save', err, boxId, id, data)
+            }
             /* istanbul ignore next */
             reject(err);
           }
@@ -327,8 +356,14 @@ export const NeDBBackend = (options) => {
               { ...cleanedData, _createdOn: Date.now(), _id: actualId },
               (err, doc) => {
                 if (err) {
+                  for (hook in boxRecord.postHooksFail) {
+                    hook('save', err, boxId, id, data)
+                  }
                   /* istanbul ignore next */
                   reject(err);
+                }
+                for (hook in boxRecord.postHooksSuccess) {
+                  hook('save', doc, boxId, id, data)
                 }
                 resolve(doc);
               }
@@ -346,11 +381,21 @@ export const NeDBBackend = (options) => {
               { returnUpdatedDocs: true },
               (err, numAffected, affectedDoc) => {
                 if (!numAffected) {
-                  reject(new Error('Resource not found'));
+                  newErr = new Error('Resource not found');
+                  for (hook in boxRecord.postHooksFail) {
+                    hook('save', newErr, boxId, id, data)
+                  }
+                  reject(newErr);
                 }
                 if (err) {
                   /* istanbul ignore next */
+                  for (hook in boxRecord.postHooksFail) {
+                    hook('save', err, boxId, id, data)
+                  }
                   reject(err);
+                }
+                for (hook in boxRecord.postHooksSuccess) {
+                  hook('save', affectedDoc, boxId, id, data)
                 }
                 resolve(affectedDoc);
               }
@@ -364,6 +409,9 @@ export const NeDBBackend = (options) => {
       const boxRecord = await getBoxOption(boxId);
       if (!boxRecord) {
         throwError('Box not found', 404);
+      }
+      for (hook in boxRecord.preHooks) {
+        hook('updated', boxId, id, data)
       }
       const boxDB = getBoxDB(boxId);
 
@@ -384,11 +432,21 @@ export const NeDBBackend = (options) => {
           { returnUpdatedDocs: true },
           (err, numAffected, affectedDoc) => {
             if (!numAffected) {
-              reject(new Error('Resource not found'));
+              newErr = new Error('Resource not found');
+              for (hook in boxRecord.postHooksFail) {
+                hook('updated', newErr, boxId, id, data)
+              }
+              reject(newErr);
             }
             if (err) {
+              for (hook in boxRecord.postHooksFail) {
+                hook('updated', err, boxId, id, data)
+              }
               /* istanbul ignore next */
               reject(err);
+            }
+            for (hook in boxRecord.postHooksSuccess) {
+              hook('updated', affectedDoc, boxId, id, data)
             }
             resolve(affectedDoc);
           }
@@ -399,14 +457,23 @@ export const NeDBBackend = (options) => {
     async delete(boxId, id) {
       const boxRecord = await getBoxOption(boxId);
       if (!boxRecord) {
-        return 0;
+        throwError('Box not found', 404);
+      }
+      for (hook in boxRecord.preHooks) {
+        hook('delete', boxId, id)
       }
       const boxDB = getBoxDB(boxId);
       return new Promise((resolve, reject) => {
         boxDB.remove({ _id: id }, {}, (err, numRemoved) => {
           if (err) {
+            for (hook in boxRecord.postHooksFail) {
+              hook('delete', err, boxId, id)
+            }
             /* istanbul ignore next */
             reject(err);
+          }
+          for (hook in boxRecord.postHooksSuccess) {
+            hook('delete', numRemoved, boxId, id)
           }
           resolve(numRemoved);
         });
